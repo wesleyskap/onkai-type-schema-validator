@@ -1,18 +1,12 @@
 import inspect
-from typing import Any, Self, get_type_hints
-from typed_schema_validator.errors import FieldError, ValidationError
+from typing import Any, Callable, Self
+from typed_schema_validator.field import FieldInfo
+from typed_schema_validator.field_validator import FieldValidatorMarker
 
 
 class Schema:
     """
-    Base Schema class for creating strongly-typed models without boilerplate.
-    
-    Example:
-        class User[T](Schema):
-            id: int
-            name: str
-            metadata: T
-            tags: list[str] = []
+    Base Schema class for creating strongly-typed models with constraint and validation capabilities.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -21,8 +15,12 @@ class Schema:
             if name in kwargs:
                 setattr(self, name, kwargs[name])
             elif hasattr(self.__class__, name):
-                # Class attribute default value
-                setattr(self, name, getattr(self.__class__, name))
+                attr_val = getattr(self.__class__, name)
+                if isinstance(attr_val, FieldInfo):
+                    if attr_val.has_default():
+                        setattr(self, name, attr_val.get_default())
+                else:
+                    setattr(self, name, attr_val)
 
     @classmethod
     def _get_resolved_annotations(cls) -> dict[str, Any]:
@@ -36,15 +34,37 @@ class Schema:
         return annotations
 
     @classmethod
+    def _get_field_validators(cls) -> dict[str, list[Callable[..., Any]]]:
+        """Collect @field_validator methods defined across class hierarchy."""
+        validators: dict[str, list[Callable[..., Any]]] = {}
+        for base in reversed(cls.__mro__):
+            if base is Schema or not issubclass(base, Schema):
+                continue
+            for name, attr in base.__dict__.items():
+                if isinstance(attr, FieldValidatorMarker):
+                    func = attr.func
+                    # If it's a classmethod or staticmethod wrapper, unwrap it
+                    if isinstance(func, (classmethod, staticmethod)):
+                        func = func.__func__
+                    for field_name in attr.fields:
+                        validators.setdefault(field_name, []).append(func)
+                elif hasattr(attr, "__func__"):
+                    raw_func = getattr(attr, "__func__")
+                    if isinstance(raw_func, FieldValidatorMarker):
+                        for field_name in raw_func.fields:
+                            validators.setdefault(field_name, []).append(raw_func.func)
+        return validators
+
+    @classmethod
     def validate(cls, data: Any) -> Self:
         """Validate input dictionary/data and return an instance of this Schema."""
-        from typed_schema_validator.validator import validate
-        return validate(cls, data)
+        from typed_schema_validator.validator import validate as core_validate
+        return core_validate(cls, data)
 
     def dump(self) -> dict[str, Any]:
         """Dump schema instance back to python primitives / dictionary."""
-        from typed_schema_validator.serializer import dump
-        return dump(self)
+        from typed_schema_validator.serializer import dump as core_dump
+        return core_dump(self)
 
     def __repr__(self) -> str:
         hints = self._get_resolved_annotations()

@@ -5,6 +5,7 @@ import typing
 from typing import Any, Literal, get_args, get_origin
 
 from typed_schema_validator.errors import FieldError, ValidationError
+from typed_schema_validator.field import FieldInfo
 from typed_schema_validator.schema import Schema
 from typed_schema_validator.type_inspector import (
     build_type_var_map,
@@ -19,13 +20,94 @@ from typed_schema_validator.type_inspector import (
 def validate[T](target_type: Any, data: Any, path: str = "") -> T:
     """
     Validate `data` against `target_type` (including PEP 695 generics, aliases, unions, schemas).
-    Raises ValidationError if data fails to match target_type.
+    Raises ValidationError if data fails to match target_type or field constraints.
     """
     errors: list[FieldError] = []
     result = _validate_internal(target_type, data, path, errors, type_var_map={})
     if errors:
         raise ValidationError(errors)
     return result
+
+
+def _check_field_constraints(
+    field_info: FieldInfo, val: Any, path: str, errors: list[FieldError]
+) -> None:
+    """Validate value against FieldInfo constraint parameters."""
+    if val is None:
+        return
+
+    # Length constraints (str, list, dict, set, tuple)
+    if hasattr(val, "__len__"):
+        length = len(val)
+        if field_info.min_length is not None and length < field_info.min_length:
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f"min_length={field_info.min_length}",
+                    actual_value=val,
+                    message=f"Length {length} is less than minimum required length {field_info.min_length}",
+                )
+            )
+        if field_info.max_length is not None and length > field_info.max_length:
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f"max_length={field_info.max_length}",
+                    actual_value=val,
+                    message=f"Length {length} exceeds maximum allowed length {field_info.max_length}",
+                )
+            )
+
+    # Numeric constraints (int, float)
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        if field_info.gt is not None and val <= field_info.gt:
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f">{field_info.gt}",
+                    actual_value=val,
+                    message=f"Value {val} must be strictly greater than {field_info.gt}",
+                )
+            )
+        if field_info.ge is not None and val < field_info.ge:
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f">={field_info.ge}",
+                    actual_value=val,
+                    message=f"Value {val} must be greater than or equal to {field_info.ge}",
+                )
+            )
+        if field_info.lt is not None and val >= field_info.lt:
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f"<{field_info.lt}",
+                    actual_value=val,
+                    message=f"Value {val} must be strictly less than {field_info.lt}",
+                )
+            )
+        if field_info.le is not None and val > field_info.le:
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f"<={field_info.le}",
+                    actual_value=val,
+                    message=f"Value {val} must be less than or equal to {field_info.le}",
+                )
+            )
+
+    # Pattern constraint (regex on str)
+    if field_info.pattern is not None and isinstance(val, str):
+        if not field_info.pattern.search(val):
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f"pattern '{field_info.pattern.pattern}'",
+                    actual_value=val,
+                    message=f"String '{val}' does not match pattern '{field_info.pattern.pattern}'",
+                )
+            )
 
 
 def _validate_internal(
@@ -62,7 +144,6 @@ def _validate_internal(
         if data is None and type(None) in union_args:
             return None
 
-        # Try each variant in Union
         for variant in union_args:
             if variant is type(None) and data is not None:
                 continue
@@ -71,7 +152,6 @@ def _validate_internal(
             if not sub_errors:
                 return res
 
-        # Failed all union options
         expected_str = " | ".join(
             getattr(arg, "__name__", str(arg)) for arg in union_args
         )
@@ -121,7 +201,6 @@ def _validate_internal(
     if origin is not None:
         args = get_args(target_type)
 
-        # list[T]
         if origin is list or origin is typing.List:
             if not isinstance(data, list):
                 errors.append(
@@ -143,7 +222,6 @@ def _validate_internal(
                 validated_list.append(validated_item)
             return validated_list
 
-        # dict[K, V]
         if origin is dict or origin is typing.Dict:
             if not isinstance(data, dict):
                 errors.append(
@@ -166,7 +244,6 @@ def _validate_internal(
                 validated_dict[vk] = vv
             return validated_dict
 
-        # set[T]
         if origin is set or origin is typing.Set:
             if not isinstance(data, (set, list, tuple)):
                 errors.append(
@@ -187,7 +264,6 @@ def _validate_internal(
                 )
             return validated_set
 
-        # tuple[...]
         if origin is tuple or origin is typing.Tuple:
             if not isinstance(data, (tuple, list)):
                 errors.append(
@@ -251,20 +327,58 @@ def _validate_internal(
             return None
 
         annotations = raw_class._get_resolved_annotations()
+        custom_validators = raw_class._get_field_validators()
         kwargs = {}
 
         for field_name, field_type in annotations.items():
             field_path = f"{path}.{field_name}" if path else field_name
             effective_type = substitute_typevars(field_type, merged_map)
+            field_info: FieldInfo | None = None
+
+            if hasattr(raw_class, field_name):
+                class_attr = getattr(raw_class, field_name)
+                if isinstance(class_attr, FieldInfo):
+                    field_info = class_attr
 
             if field_name in data:
                 val = data[field_name]
                 validated_val = _validate_internal(
                     effective_type, val, field_path, errors, merged_map
                 )
+
+                # Check FieldInfo constraints if present
+                if field_info is not None:
+                    _check_field_constraints(field_info, validated_val, field_path, errors)
+
+                # Run custom @field_validator functions
+                if field_name in custom_validators:
+                    for v_func in custom_validators[field_name]:
+                        try:
+                            # Invoke validator function (as classmethod or function)
+                            sig = inspect.signature(v_func)
+                            params_count = len(sig.parameters)
+                            if params_count >= 2:
+                                validated_val = v_func(raw_class, validated_val)
+                            else:
+                                validated_val = v_func(validated_val)
+                        except (ValueError, TypeError, AssertionError) as err:
+                            errors.append(
+                                FieldError(
+                                    path=field_path,
+                                    expected="custom validator check",
+                                    actual_value=validated_val,
+                                    message=str(err),
+                                )
+                            )
+
                 kwargs[field_name] = validated_val
-            elif hasattr(raw_class, field_name):
-                # Has class default value
+
+            elif field_info is not None and field_info.has_default():
+                default_val = field_info.get_default()
+                kwargs[field_name] = default_val
+            elif hasattr(raw_class, field_name) and not isinstance(
+                getattr(raw_class, field_name), FieldInfo
+            ):
                 kwargs[field_name] = getattr(raw_class, field_name)
             elif is_optional_type(effective_type):
                 kwargs[field_name] = None
@@ -278,13 +392,11 @@ def _validate_internal(
                     )
                 )
 
-        # Return instance of raw_class
         instance = raw_class(**kwargs)
         return instance
 
     # 10. Basic Primitives & Standard Types
     if isinstance(target_type, type):
-        # Strict checking for bool vs int
         if target_type is int and isinstance(data, bool):
             errors.append(
                 FieldError(
