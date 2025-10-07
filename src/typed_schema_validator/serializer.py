@@ -1,3 +1,4 @@
+import dataclasses
 import enum
 from datetime import date, datetime
 from typing import Any
@@ -16,6 +17,14 @@ def dump(obj: Any) -> Any:
         hints = obj._get_resolved_annotations()
         result = {}
         for key in hints:
+            val = getattr(obj, key, None)
+            result[key] = dump(val)
+        return result
+
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        result = {}
+        for field_obj in dataclasses.fields(obj):
+            key = field_obj.name
             val = getattr(obj, key, None)
             result[key] = dump(val)
         return result

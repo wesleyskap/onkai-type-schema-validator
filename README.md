@@ -5,13 +5,13 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 ## Features
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
+- **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
 - **Zero Dependencies**: Lightweight implementation relying exclusively on Python 3.12+ standard library features.
 - **Field Constraints**: Declarative validation using `Field(min_length=..., max_length=..., gt=..., lt=..., pattern=...)`.
 - **Custom Field Validators**: Flexible `@field_validator` decorator for custom validation logic and value transformation.
 - **Strict Runtime Validation**: Recursive validation for primitive scalars, generic models, unions (`T | None`, `int | str`), enums, literals, lists, dicts, sets, and tuples.
-- **Recursive Serialization**: Built-in `dump()` method to convert schema instances and nested structures into JSON-compatible Python primitives.
+- **Recursive Serialization**: Built-in `dump()` method to convert schema instances, dataclasses, and nested structures into JSON-compatible Python primitives.
 - **Detailed Error Reporting**: `ValidationError` with field-level path tracking (`FieldError`), expected types, and actual values.
-- **Class Default Values**: Automatic fallback to class-level default values, default factories, and optional field resolution.
 
 ## Requirements
 
@@ -48,6 +48,34 @@ print(user.email) # None
 data_dict = user.dump()
 ```
 
+### Dataclass and TypedDict Validation
+
+```python
+from dataclasses import dataclass
+from typing import TypedDict
+from typed_schema_validator import validate, dump
+
+@dataclass
+class Point[T]:
+    x: T
+    y: T
+
+class UserPayload(TypedDict):
+    username: str
+    age: int
+
+# Validating dataclass instance
+point = validate(Point[float], {"x": 10.5, "y": 20.0})
+print(point.x) # 10.5
+
+# Validating TypedDict
+payload = validate(UserPayload, {"username": "carlos", "age": 30})
+print(payload["username"]) # carlos
+
+# Dumping dataclass
+print(dump(point)) # {'x': 10.5, 'y': 20.0}
+```
+
 ### Field Constraints and Custom Validators
 
 ```python
@@ -60,7 +88,7 @@ class UserRegistration(Schema):
 
     @field_validator("email")
     def validate_email_domain(cls, v: str) -> str:
-        if "@company.com" not in v:
+        if "@company.com" not in v.lower():
             raise ValueError("Email must belong to @company.com domain")
         return v.lower()
 
@@ -140,8 +168,8 @@ except ValidationError as e:
 2. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, default factories).
 3. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator to register custom validation and transformation methods.
 4. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, and type variable substitutions.
-5. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
-6. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, datetimes, enums, and collections back to standard Python dictionaries and primitives.
+5. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
+6. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives.
 7. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
 
 ## Running Tests

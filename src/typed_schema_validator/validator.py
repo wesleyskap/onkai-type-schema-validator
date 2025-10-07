@@ -1,8 +1,9 @@
+import dataclasses
 import enum
 import inspect
 import types
 import typing
-from typing import Any, Literal, get_args, get_origin
+from typing import Any, Literal, get_args, get_origin, get_type_hints, is_typeddict
 
 from typed_schema_validator.errors import FieldError, ValidationError
 from typed_schema_validator.field import FieldInfo
@@ -19,7 +20,7 @@ from typed_schema_validator.type_inspector import (
 
 def validate[T](target_type: Any, data: Any, path: str = "") -> T:
     """
-    Validate `data` against `target_type` (including PEP 695 generics, aliases, unions, schemas).
+    Validate `data` against `target_type` (including PEP 695 generics, dataclasses, typeddicts, unions, schemas).
     Raises ValidationError if data fails to match target_type or field constraints.
     """
     errors: list[FieldError] = []
@@ -36,7 +37,6 @@ def _check_field_constraints(
     if val is None:
         return
 
-    # Length constraints (str, list, dict, set, tuple)
     if hasattr(val, "__len__"):
         length = len(val)
         if field_info.min_length is not None and length < field_info.min_length:
@@ -58,7 +58,6 @@ def _check_field_constraints(
                 )
             )
 
-    # Numeric constraints (int, float)
     if isinstance(val, (int, float)) and not isinstance(val, bool):
         if field_info.gt is not None and val <= field_info.gt:
             errors.append(
@@ -97,7 +96,6 @@ def _check_field_constraints(
                 )
             )
 
-    # Pattern constraint (regex on str)
     if field_info.pattern is not None and isinstance(val, str):
         if not field_info.pattern.search(val):
             errors.append(
@@ -117,28 +115,27 @@ def _validate_internal(
     errors: list[FieldError],
     type_var_map: dict[Any, Any],
 ) -> Any:
-    # 1. Build type var mapping from specialized generic / alias args (e.g., ItemList[Config])
+    # 1. Build type var mapping from specialized generic / alias args
     base_origin, new_type_var_map = build_type_var_map(target_type)
     merged_map = {**type_var_map, **new_type_var_map}
 
-    # 2. Resolve PEP 695 TypeAliasType (e.g., `type Result[T] = dict[str, T]`)
+    # 2. Resolve PEP 695 TypeAliasType
     if is_pep695_alias(target_type):
         target_type = target_type.__value__
     elif is_pep695_alias(base_origin):
         target_type = base_origin.__value__
 
-    # 3. Substitute any active TypeVars from generic parent context
+    # 3. Substitute active TypeVars
     target_type = substitute_typevars(target_type, merged_map)
 
     # 4. Any / object type bypass
     if target_type is Any or target_type is object:
         return data
 
-    # Re-evaluate base_origin & new_type_var_map after substitution/unwrapping if needed
     base_origin, extra_type_var_map = build_type_var_map(target_type)
     merged_map.update(extra_type_var_map)
 
-    # 5. Union Types (e.g. int | str, T | None)
+    # 5. Union Types
     if is_union_type(target_type):
         union_args = get_union_args(target_type)
         if data is None and type(None) in union_args:
@@ -196,7 +193,102 @@ def _validate_internal(
             )
             return None
 
-    # 8. Container Origin Types (list, dict, set, tuple)
+    # 8. TypedDict Validation
+    raw_class = base_origin if inspect.isclass(base_origin) else target_type
+    if inspect.isclass(raw_class) and is_typeddict(raw_class):
+        if not isinstance(data, dict):
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f"TypedDict '{raw_class.__name__}'",
+                    actual_value=data,
+                    message=f"Expected dict for TypedDict '{raw_class.__name__}', got {type(data).__name__}",
+                )
+            )
+            return None
+
+        annotations = get_type_hints(raw_class, include_extras=True)
+        required_keys = getattr(raw_class, "__required_keys__", set(annotations.keys()))
+        validated_dict = {}
+
+        for key, raw_field_type in annotations.items():
+            key_path = f"{path}.{key}" if path else key
+            effective_type = substitute_typevars(raw_field_type, merged_map)
+
+            # Handle Required / NotRequired wrappers
+            field_origin = get_origin(effective_type)
+            if field_origin is typing.Required:
+                effective_type = get_args(effective_type)[0]
+                is_req = True
+            elif field_origin is typing.NotRequired:
+                effective_type = get_args(effective_type)[0]
+                is_req = False
+            else:
+                is_req = key in required_keys
+
+            if key in data:
+                val = data[key]
+                validated_val = _validate_internal(
+                    effective_type, val, key_path, errors, merged_map
+                )
+                validated_dict[key] = validated_val
+            elif is_req:
+                errors.append(
+                    FieldError(
+                        path=key_path,
+                        expected=getattr(effective_type, "__name__", str(effective_type)),
+                        actual_value=None,
+                        message=f"Missing required TypedDict key '{key}'",
+                    )
+                )
+
+        return validated_dict
+
+    # 9. Standard Dataclass Validation
+    if inspect.isclass(raw_class) and dataclasses.is_dataclass(raw_class):
+        if not isinstance(data, dict):
+            errors.append(
+                FieldError(
+                    path=path,
+                    expected=f"Dataclass '{raw_class.__name__}'",
+                    actual_value=data,
+                    message=f"Expected dict for Dataclass '{raw_class.__name__}', got {type(data).__name__}",
+                )
+            )
+            return None
+
+        dc_fields = {f.name: f for f in dataclasses.fields(raw_class)}
+        kwargs = {}
+
+        for f_name, f_obj in dc_fields.items():
+            field_path = f"{path}.{f_name}" if path else f_name
+            effective_type = substitute_typevars(f_obj.type, merged_map)
+
+            if f_name in data:
+                val = data[f_name]
+                validated_val = _validate_internal(
+                    effective_type, val, field_path, errors, merged_map
+                )
+                kwargs[f_name] = validated_val
+            elif f_obj.default is not dataclasses.MISSING:
+                kwargs[f_name] = f_obj.default
+            elif f_obj.default_factory is not dataclasses.MISSING:
+                kwargs[f_name] = f_obj.default_factory()
+            elif is_optional_type(effective_type):
+                kwargs[f_name] = None
+            else:
+                errors.append(
+                    FieldError(
+                        path=field_path,
+                        expected=getattr(effective_type, "__name__", str(effective_type)),
+                        actual_value=None,
+                        message=f"Missing required dataclass field '{f_name}'",
+                    )
+                )
+
+        return raw_class(**kwargs)
+
+    # 10. Container Origin Types (list, dict, set, tuple)
     origin = base_origin if base_origin is not target_type else get_origin(target_type)
     if origin is not None:
         args = get_args(target_type)
@@ -312,8 +404,7 @@ def _validate_internal(
                     )
                     return validated_tuple
 
-    # 9. Schema Subclass Validation
-    raw_class = base_origin if inspect.isclass(base_origin) else target_type
+    # 11. Schema Subclass Validation
     if inspect.isclass(raw_class) and issubclass(raw_class, Schema):
         if not isinstance(data, dict):
             errors.append(
@@ -346,15 +437,12 @@ def _validate_internal(
                     effective_type, val, field_path, errors, merged_map
                 )
 
-                # Check FieldInfo constraints if present
                 if field_info is not None:
                     _check_field_constraints(field_info, validated_val, field_path, errors)
 
-                # Run custom @field_validator functions
                 if field_name in custom_validators:
                     for v_func in custom_validators[field_name]:
                         try:
-                            # Invoke validator function (as classmethod or function)
                             sig = inspect.signature(v_func)
                             params_count = len(sig.parameters)
                             if params_count >= 2:
@@ -395,7 +483,7 @@ def _validate_internal(
         instance = raw_class(**kwargs)
         return instance
 
-    # 10. Basic Primitives & Standard Types
+    # 12. Basic Primitives & Standard Types
     if isinstance(target_type, type):
         if target_type is int and isinstance(data, bool):
             errors.append(
