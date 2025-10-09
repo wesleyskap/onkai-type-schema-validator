@@ -189,6 +189,27 @@ except ValidationError as e:
 7. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives.
 8. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
 
+## Running Benchmarks
+
+```bash
+python benchmarks/bench_validation.py
+```
+
+### Example Benchmark Results
+
+```text
+============================================================
+ Typed Schema Validator - Performance benchmark suite 
+============================================================
+Simple Schema Validation       |   15.48 us/op |     64,609 ops/sec
+PEP 695 Generic Validation     |   47.15 us/op |     21,210 ops/sec
+Dataclass Validation           |    7.54 us/op |    132,642 ops/sec
+TypedDict Validation           |   18.30 us/op |     54,632 ops/sec
+Model Dump (Serialization)     |    1.97 us/op |    506,988 ops/sec
+JSON Schema Generation         |   37.79 us/op |     26,463 ops/sec
+============================================================
+```
+
 ## Running Tests
 
 ```bash
