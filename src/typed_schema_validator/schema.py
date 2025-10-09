@@ -6,7 +6,8 @@ from typed_schema_validator.field_validator import FieldValidatorMarker
 
 class Schema:
     """
-    Base Schema class for creating strongly-typed models with constraint and validation capabilities.
+    Base Schema class for creating strongly-typed models with constraint, validation,
+    and JSON Schema generation capabilities.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -43,7 +44,6 @@ class Schema:
             for name, attr in base.__dict__.items():
                 if isinstance(attr, FieldValidatorMarker):
                     func = attr.func
-                    # If it's a classmethod or staticmethod wrapper, unwrap it
                     if isinstance(func, (classmethod, staticmethod)):
                         func = func.__func__
                     for field_name in attr.fields:
@@ -60,6 +60,12 @@ class Schema:
         """Validate input dictionary/data and return an instance of this Schema."""
         from typed_schema_validator.validator import validate as core_validate
         return core_validate(cls, data)
+
+    @classmethod
+    def json_schema(cls) -> dict[str, Any]:
+        """Generate JSON Schema dictionary for this Schema model."""
+        from typed_schema_validator.json_schema import to_json_schema
+        return to_json_schema(cls)
 
     def dump(self) -> dict[str, Any]:
         """Dump schema instance back to python primitives / dictionary."""
