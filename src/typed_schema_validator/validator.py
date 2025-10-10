@@ -215,7 +215,6 @@ def _validate_internal(
             key_path = f"{path}.{key}" if path else key
             effective_type = substitute_typevars(raw_field_type, merged_map)
 
-            # Handle Required / NotRequired wrappers
             field_origin = get_origin(effective_type)
             if field_origin is typing.Required:
                 effective_type = get_args(effective_type)[0]
@@ -419,6 +418,22 @@ def _validate_internal(
 
         annotations = raw_class._get_resolved_annotations()
         custom_validators = raw_class._get_field_validators()
+        extra_policy = getattr(raw_class, "extra", "ignore")
+
+        # Forbid extra fields check
+        if extra_policy == "forbid":
+            for data_key in data:
+                if data_key not in annotations:
+                    extra_path = f"{path}.{data_key}" if path else data_key
+                    errors.append(
+                        FieldError(
+                            path=extra_path,
+                            expected="no extra fields",
+                            actual_value=data[data_key],
+                            message=f"Unexpected extra field '{data_key}'",
+                        )
+                    )
+
         kwargs = {}
 
         for field_name, field_type in annotations.items():

@@ -7,8 +7,14 @@ from typed_schema_validator.field_validator import FieldValidatorMarker
 class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
-    and JSON Schema generation capabilities.
+    extra field policies, and JSON Schema generation capabilities.
     """
+
+    extra: str = "ignore"  # Options: "ignore", "forbid"
+
+    def __init_subclass__(cls, extra: str = "ignore", **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls.extra = extra
 
     def __init__(self, **kwargs: Any) -> None:
         hints = self._get_resolved_annotations()

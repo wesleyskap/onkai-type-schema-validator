@@ -6,6 +6,7 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
 - **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
+- **Extra Fields Policy**: Support for strict schema definition using `class StrictModel(Schema, extra="forbid")` to reject unmapped input attributes.
 - **JSON Schema / OpenAPI Generation**: Automatic generation of JSON Schema (Draft-07) dictionaries via `to_json_schema()` or `Schema.json_schema()`.
 - **Zero Dependencies**: Lightweight implementation relying exclusively on Python 3.12+ standard library features.
 - **Field Constraints**: Declarative validation using `Field(min_length=..., max_length=..., gt=..., lt=..., pattern=...)`.
@@ -47,6 +48,21 @@ print(user.email) # None
 
 # Dump to dictionary
 data_dict = user.dump()
+```
+
+### Strict Extra Fields Policy
+
+```python
+from typed_schema_validator import Schema, validate, ValidationError
+
+class StrictAccount(Schema, extra="forbid"):
+    id: int
+    username: str
+
+try:
+    validate(StrictAccount, {"id": 1, "username": "admin", "unknown_key": "bar"})
+except ValidationError as e:
+    print(e)  # Unexpected extra field 'unknown_key'
 ```
 
 ### JSON Schema / OpenAPI Generation
@@ -180,12 +196,12 @@ except ValidationError as e:
 
 ## Architecture
 
-1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, field annotations, equality checking, custom validator collection, and JSON Schema export.
+1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, extra field policy configuration, field annotations, equality checking, custom validator collection, and JSON Schema export.
 2. **JSON Schema Engine (`src/typed_schema_validator/json_schema.py`)**: Generates OpenAPI / JSON Schema Draft-07 dictionaries resolving PEP 695 generic type parameters and constraints.
 3. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, default factories).
 4. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator to register custom validation and transformation methods.
 5. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, and type variable substitutions.
-6. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
+6. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, extra field policies, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
 7. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives.
 8. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
 
