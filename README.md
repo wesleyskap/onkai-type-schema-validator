@@ -6,6 +6,7 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
 - **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
+- **Frozen Immutable Schemas**: Support for hashable, read-only models using `class ImmutableModel(Schema, frozen=True)`.
 - **Extra Fields Policy**: Support for strict schema definition using `class StrictModel(Schema, extra="forbid")` to reject unmapped input attributes.
 - **JSON Schema / OpenAPI Generation**: Automatic generation of JSON Schema (Draft-07) dictionaries via `to_json_schema()` or `Schema.json_schema()`.
 - **Zero Dependencies**: Lightweight implementation relying exclusively on Python 3.12+ standard library features.
@@ -48,6 +49,22 @@ print(user.email) # None
 
 # Dump to dictionary
 data_dict = user.dump()
+```
+
+### Frozen Immutable Schemas
+
+```python
+from typed_schema_validator import Schema, validate
+
+class ImmutableUser(Schema, frozen=True):
+    id: int
+    name: str
+
+user = validate(ImmutableUser, {"id": 1, "name": "Alice"})
+# user.name = "Bob"  # Raises TypeError: Cannot mutate field 'name' on frozen schema 'ImmutableUser'
+
+# Hashable and can be used in sets or dict keys
+user_set = {user}
 ```
 
 ### Strict Extra Fields Policy
@@ -196,7 +213,7 @@ except ValidationError as e:
 
 ## Architecture
 
-1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, extra field policy configuration, field annotations, equality checking, custom validator collection, and JSON Schema export.
+1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
 2. **JSON Schema Engine (`src/typed_schema_validator/json_schema.py`)**: Generates OpenAPI / JSON Schema Draft-07 dictionaries resolving PEP 695 generic type parameters and constraints.
 3. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, default factories).
 4. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator to register custom validation and transformation methods.
