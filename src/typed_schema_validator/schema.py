@@ -7,7 +7,7 @@ from typed_schema_validator.field_validator import FieldValidatorMarker
 class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
-    extra field policies, frozen immutability, and JSON Schema generation capabilities.
+    aliases, extra field policies, frozen immutability, and JSON Schema generation capabilities.
     """
 
     extra: str = "ignore"  # Options: "ignore", "forbid"
@@ -23,15 +23,24 @@ class Schema:
     def __init__(self, **kwargs: Any) -> None:
         hints = self._get_resolved_annotations()
         for name in hints:
-            if name in kwargs:
-                super().__setattr__(name, kwargs[name])
-            elif hasattr(self.__class__, name):
+            field_info: FieldInfo | None = None
+            if hasattr(self.__class__, name):
                 attr_val = getattr(self.__class__, name)
                 if isinstance(attr_val, FieldInfo):
-                    if attr_val.has_default():
-                        super().__setattr__(name, attr_val.get_default())
-                else:
-                    super().__setattr__(name, attr_val)
+                    field_info = attr_val
+
+            alias_name = field_info.alias if field_info and field_info.alias else name
+
+            if name in kwargs:
+                super().__setattr__(name, kwargs[name])
+            elif alias_name in kwargs:
+                super().__setattr__(name, kwargs[alias_name])
+            elif field_info is not None and field_info.has_default():
+                super().__setattr__(name, field_info.get_default())
+            elif hasattr(self.__class__, name) and not isinstance(
+                getattr(self.__class__, name), FieldInfo
+            ):
+                super().__setattr__(name, getattr(self.__class__, name))
 
         super().__setattr__("_initialized", True)
 
@@ -59,7 +68,6 @@ class Schema:
         for k in hints:
             val = getattr(self, k, None)
             if isinstance(val, (list, dict, set)):
-                # Convert unhashable containers for hash computation
                 values.append((k, str(val)))
             else:
                 values.append((k, val))
@@ -109,10 +117,10 @@ class Schema:
         from typed_schema_validator.json_schema import to_json_schema
         return to_json_schema(cls)
 
-    def dump(self) -> dict[str, Any]:
+    def dump(self, by_alias: bool = False) -> dict[str, Any]:
         """Dump schema instance back to python primitives / dictionary."""
         from typed_schema_validator.serializer import dump as core_dump
-        return core_dump(self)
+        return core_dump(self, by_alias=by_alias)
 
     def __repr__(self) -> str:
         hints = self._get_resolved_annotations()

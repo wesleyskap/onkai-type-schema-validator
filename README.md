@@ -6,6 +6,7 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
 - **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
+- **Field Aliases**: Map external key names (e.g., `camelCase`) to Pythonic attribute names using `Field(alias="...")` and export via `dump(by_alias=True)`.
 - **Frozen Immutable Schemas**: Support for hashable, read-only models using `class ImmutableModel(Schema, frozen=True)`.
 - **Extra Fields Policy**: Support for strict schema definition using `class StrictModel(Schema, extra="forbid")` to reject unmapped input attributes.
 - **JSON Schema / OpenAPI Generation**: Automatic generation of JSON Schema (Draft-07) dictionaries via `to_json_schema()` or `Schema.json_schema()`.
@@ -49,6 +50,28 @@ print(user.email) # None
 
 # Dump to dictionary
 data_dict = user.dump()
+```
+
+### Field Aliases and Serialization
+
+```python
+from typed_schema_validator import Schema, Field, validate, dump
+
+class UserProfile(Schema):
+    user_id: int = Field(alias="userId")
+    first_name: str = Field(alias="firstName")
+
+payload = {
+    "userId": 100,
+    "firstName": "Alice"
+}
+
+user = validate(UserProfile, payload)
+print(user.user_id)     # 100
+print(user.first_name)  # Alice
+
+# Dump back to dictionary using aliases
+print(dump(user, by_alias=True))  # {'userId': 100, 'firstName': 'Alice'}
 ```
 
 ### Frozen Immutable Schemas
@@ -213,13 +236,13 @@ except ValidationError as e:
 
 ## Architecture
 
-1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
+1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, field aliases, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
 2. **JSON Schema Engine (`src/typed_schema_validator/json_schema.py`)**: Generates OpenAPI / JSON Schema Draft-07 dictionaries resolving PEP 695 generic type parameters and constraints.
-3. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, default factories).
+3. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, field aliases, default factories).
 4. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator to register custom validation and transformation methods.
 5. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, and type variable substitutions.
-6. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, extra field policies, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
-7. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives.
+6. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, field aliases, extra field policies, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
+7. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives with optional alias mapping (`by_alias=True`).
 8. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
 
 ## Running Benchmarks

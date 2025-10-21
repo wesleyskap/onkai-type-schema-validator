@@ -3,12 +3,13 @@ from typing import Any, Callable
 
 
 class FieldInfo:
-    """Metadata container for field constraints and defaults."""
+    """Metadata container for field constraints, defaults, and aliases."""
 
     def __init__(
         self,
         default: Any = ...,
         default_factory: Callable[[], Any] | None = None,
+        alias: str | None = None,
         min_length: int | None = None,
         max_length: int | None = None,
         gt: float | int | None = None,
@@ -20,6 +21,7 @@ class FieldInfo:
     ) -> None:
         self.default = default
         self.default_factory = default_factory
+        self.alias = alias
         self.min_length = min_length
         self.max_length = max_length
         self.gt = gt
@@ -44,6 +46,7 @@ def Field(
     default: Any = ...,
     *,
     default_factory: Callable[[], Any] | None = None,
+    alias: str | None = None,
     min_length: int | None = None,
     max_length: int | None = None,
     gt: float | int | None = None,
@@ -57,6 +60,7 @@ def Field(
     return FieldInfo(
         default=default,
         default_factory=default_factory,
+        alias=alias,
         min_length=min_length,
         max_length=max_length,
         gt=gt,

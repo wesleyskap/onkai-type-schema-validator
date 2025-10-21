@@ -420,10 +420,27 @@ def _validate_internal(
         custom_validators = raw_class._get_field_validators()
         extra_policy = getattr(raw_class, "extra", "ignore")
 
+        # Build map of mapped input keys for validation and extra policy
+        mapped_input_keys = set()
+        field_info_map: dict[str, FieldInfo] = {}
+
+        for fn in annotations:
+            f_info: FieldInfo | None = None
+            if hasattr(raw_class, fn):
+                class_attr = getattr(raw_class, fn)
+                if isinstance(class_attr, FieldInfo):
+                    f_info = class_attr
+
+            if f_info is not None:
+                field_info_map[fn] = f_info
+                if f_info.alias:
+                    mapped_input_keys.add(f_info.alias)
+            mapped_input_keys.add(fn)
+
         # Forbid extra fields check
         if extra_policy == "forbid":
             for data_key in data:
-                if data_key not in annotations:
+                if data_key not in mapped_input_keys:
                     extra_path = f"{path}.{data_key}" if path else data_key
                     errors.append(
                         FieldError(
@@ -439,17 +456,22 @@ def _validate_internal(
         for field_name, field_type in annotations.items():
             field_path = f"{path}.{field_name}" if path else field_name
             effective_type = substitute_typevars(field_type, merged_map)
-            field_info: FieldInfo | None = None
+            field_info = field_info_map.get(field_name)
+            alias_key = field_info.alias if field_info and field_info.alias else field_name
 
-            if hasattr(raw_class, field_name):
-                class_attr = getattr(raw_class, field_name)
-                if isinstance(class_attr, FieldInfo):
-                    field_info = class_attr
+            input_val = None
+            found_key = False
 
-            if field_name in data:
-                val = data[field_name]
+            if alias_key in data:
+                input_val = data[alias_key]
+                found_key = True
+            elif field_name in data:
+                input_val = data[field_name]
+                found_key = True
+
+            if found_key:
                 validated_val = _validate_internal(
-                    effective_type, val, field_path, errors, merged_map
+                    effective_type, input_val, field_path, errors, merged_map
                 )
 
                 if field_info is not None:
