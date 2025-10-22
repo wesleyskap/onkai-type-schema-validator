@@ -1,3 +1,4 @@
+import functools
 import inspect
 from typing import Any, Callable, Self
 from typed_schema_validator.field import FieldInfo
@@ -7,7 +8,7 @@ from typed_schema_validator.field_validator import FieldValidatorMarker
 class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
-    aliases, extra field policies, frozen immutability, and JSON Schema generation capabilities.
+    aliases, extra field policies, frozen immutability, cached reflection, and JSON Schema generation capabilities.
     """
 
     extra: str = "ignore"  # Options: "ignore", "forbid"
@@ -74,6 +75,7 @@ class Schema:
         return hash((self.__class__.__name__, tuple(values)))
 
     @classmethod
+    @functools.lru_cache(maxsize=1024)
     def _get_resolved_annotations(cls) -> dict[str, Any]:
         """Collect class annotations, traversing hierarchy up to Schema."""
         annotations = {}
@@ -85,6 +87,7 @@ class Schema:
         return annotations
 
     @classmethod
+    @functools.lru_cache(maxsize=1024)
     def _get_field_validators(cls) -> dict[str, list[Callable[..., Any]]]:
         """Collect @field_validator methods defined across class hierarchy."""
         validators: dict[str, list[Callable[..., Any]]] = {}

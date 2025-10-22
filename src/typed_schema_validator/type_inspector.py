@@ -1,3 +1,4 @@
+import functools
 import inspect
 import types
 import typing
@@ -9,20 +10,13 @@ def is_pep695_alias(tp: Any) -> bool:
     return isinstance(tp, typing.TypeAliasType)
 
 
-def resolve_type_alias(tp: Any, type_args_map: dict[Any, Any] | None = None) -> tuple[Any, dict[Any, Any]]:
-    """
-    If tp is a PEP 695 TypeAliasType, unwrap its target value and substitute type parameters
-    if provided or specialised. Returns (unwrapped_type, updated_type_args_map).
-    """
+def resolve_type_alias(
+    tp: Any, type_args_map: dict[Any, Any] | None = None
+) -> tuple[Any, dict[Any, Any]]:
     current_map = dict(type_args_map or {})
-    
     if is_pep695_alias(tp):
-        # tp is TypeAliasType
         value = tp.__value__
-        type_params = tp.__type_params__
-        # If tp has specialized arguments (though TypeAliasType itself when indexed creates GenericAlias or unwraps)
         return value, current_map
-    
     return tp, current_map
 
 
@@ -33,6 +27,7 @@ def get_type_params(target: Any) -> tuple[Any, ...]:
     return ()
 
 
+@functools.lru_cache(maxsize=2048)
 def build_type_var_map(generic_target: Any) -> tuple[Any, dict[Any, Any]]:
     """
     Given a target (which could be a specialized generic class like `User[int]`),
@@ -41,15 +36,15 @@ def build_type_var_map(generic_target: Any) -> tuple[Any, dict[Any, Any]]:
     origin = get_origin(generic_target)
     if origin is None:
         return generic_target, {}
-    
+
     args = get_args(generic_target)
     type_params = get_type_params(origin)
-    
+
     mapping: dict[Any, Any] = {}
     if type_params and args:
         for param, arg in zip(type_params, args):
             mapping[param] = arg
-            
+
     return origin, mapping
 
 
@@ -57,15 +52,12 @@ def substitute_typevars(tp: Any, type_var_map: dict[Any, Any]) -> Any:
     """Recursively substitute TypeVars in `tp` using `type_var_map`."""
     if not type_var_map:
         return tp
-        
+
     if tp in type_var_map:
         return type_var_map[tp]
-        
-    # Unpack PEP 695 alias
+
     if is_pep695_alias(tp):
         tp_val = tp.__value__
-        # Check if alias has type params
-        alias_params = get_type_params(tp)
         return substitute_typevars(tp_val, type_var_map)
 
     origin = get_origin(tp)
@@ -73,7 +65,6 @@ def substitute_typevars(tp: Any, type_var_map: dict[Any, Any]) -> Any:
         args = get_args(tp)
         if args:
             new_args = tuple(substitute_typevars(arg, type_var_map) for arg in args)
-            # Reconstruct union type (e.g., int | str)
             if origin is types.UnionType or origin is typing.Union:
                 res = new_args[0]
                 for extra in new_args[1:]:

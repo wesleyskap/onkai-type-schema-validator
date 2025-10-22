@@ -6,6 +6,7 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
 - **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
+- **LRU Reflection Caching**: Cached reflection for annotations, PEP 695 parameters, and validators providing high validation throughput.
 - **Field Aliases**: Map external key names (e.g., `camelCase`) to Pythonic attribute names using `Field(alias="...")` and export via `dump(by_alias=True)`.
 - **Frozen Immutable Schemas**: Support for hashable, read-only models using `class ImmutableModel(Schema, frozen=True)`.
 - **Extra Fields Policy**: Support for strict schema definition using `class StrictModel(Schema, extra="forbid")` to reject unmapped input attributes.
@@ -236,11 +237,11 @@ except ValidationError as e:
 
 ## Architecture
 
-1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, field aliases, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
+1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, LRU caching for annotations and field validators, field aliases, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
 2. **JSON Schema Engine (`src/typed_schema_validator/json_schema.py`)**: Generates OpenAPI / JSON Schema Draft-07 dictionaries resolving PEP 695 generic type parameters and constraints.
 3. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, field aliases, default factories).
 4. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator to register custom validation and transformation methods.
-5. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, and type variable substitutions.
+5. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, type variable substitutions, and LRU mapping caches.
 6. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, field aliases, extra field policies, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
 7. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives with optional alias mapping (`by_alias=True`).
 8. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
@@ -255,14 +256,14 @@ python benchmarks/bench_validation.py
 
 ```text
 ============================================================
- Typed Schema Validator - Performance benchmark suite 
+ Typed Schema Validator - Performance Benchmark Suite 
 ============================================================
-Simple Schema Validation       |   15.48 us/op |     64,609 ops/sec
-PEP 695 Generic Validation     |   47.15 us/op |     21,210 ops/sec
-Dataclass Validation           |    7.54 us/op |    132,642 ops/sec
-TypedDict Validation           |   18.30 us/op |     54,632 ops/sec
-Model Dump (Serialization)     |    1.97 us/op |    506,988 ops/sec
-JSON Schema Generation         |   37.79 us/op |     26,463 ops/sec
+Simple Schema Validation       |   11.80 us/op |     84,755 ops/sec
+PEP 695 Generic Validation     |   39.02 us/op |     25,627 ops/sec
+Dataclass Validation           |    6.61 us/op |    151,374 ops/sec
+TypedDict Validation           |   15.15 us/op |     66,026 ops/sec
+Model Dump (Serialization)     |    1.75 us/op |    570,174 ops/sec
+JSON Schema Generation         |   30.53 us/op |     32,750 ops/sec
 ============================================================
 ```
 

@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import functools
 import inspect
 import types
 import typing
@@ -16,6 +17,29 @@ from typed_schema_validator.type_inspector import (
     is_union_type,
     substitute_typevars,
 )
+
+
+@functools.lru_cache(maxsize=1024)
+def _get_schema_field_info_map(raw_class: type) -> tuple[dict[str, FieldInfo], set[str]]:
+    field_info_map: dict[str, FieldInfo] = {}
+    mapped_input_keys: set[str] = set()
+
+    if hasattr(raw_class, "_get_resolved_annotations"):
+        annotations = raw_class._get_resolved_annotations()
+        for fn in annotations:
+            f_info: FieldInfo | None = None
+            if hasattr(raw_class, fn):
+                class_attr = getattr(raw_class, fn)
+                if isinstance(class_attr, FieldInfo):
+                    f_info = class_attr
+
+            if f_info is not None:
+                field_info_map[fn] = f_info
+                if f_info.alias:
+                    mapped_input_keys.add(f_info.alias)
+            mapped_input_keys.add(fn)
+
+    return field_info_map, mapped_input_keys
 
 
 def validate[T](target_type: Any, data: Any, path: str = "") -> T:
@@ -420,22 +444,7 @@ def _validate_internal(
         custom_validators = raw_class._get_field_validators()
         extra_policy = getattr(raw_class, "extra", "ignore")
 
-        # Build map of mapped input keys for validation and extra policy
-        mapped_input_keys = set()
-        field_info_map: dict[str, FieldInfo] = {}
-
-        for fn in annotations:
-            f_info: FieldInfo | None = None
-            if hasattr(raw_class, fn):
-                class_attr = getattr(raw_class, fn)
-                if isinstance(class_attr, FieldInfo):
-                    f_info = class_attr
-
-            if f_info is not None:
-                field_info_map[fn] = f_info
-                if f_info.alias:
-                    mapped_input_keys.add(f_info.alias)
-            mapped_input_keys.add(fn)
+        field_info_map, mapped_input_keys = _get_schema_field_info_map(raw_class)
 
         # Forbid extra fields check
         if extra_policy == "forbid":
