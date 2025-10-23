@@ -2,13 +2,15 @@ import functools
 import inspect
 from typing import Any, Callable, Self
 from typed_schema_validator.field import FieldInfo
+from typed_schema_validator.field_serializer import FieldSerializerMarker
 from typed_schema_validator.field_validator import FieldValidatorMarker
 
 
 class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
-    aliases, extra field policies, frozen immutability, cached reflection, and JSON Schema generation capabilities.
+    aliases, extra field policies, frozen immutability, cached reflection, model copy,
+    and JSON Schema generation capabilities.
     """
 
     extra: str = "ignore"  # Options: "ignore", "forbid"
@@ -59,6 +61,19 @@ class Schema:
             )
         super().__delattr__(name)
 
+    def copy(self, update: dict[str, Any] | None = None) -> Self:
+        """
+        Create a copy of this Schema instance with optional field overrides in `update`.
+        Works for both mutable and frozen schemas.
+        """
+        hints = self._get_resolved_annotations()
+        data = {}
+        for k in hints:
+            data[k] = getattr(self, k, None)
+        if update:
+            data.update(update)
+        return self.__class__(**data)
+
     def __hash__(self) -> int:
         if not getattr(self, "frozen", False):
             raise TypeError(
@@ -107,6 +122,28 @@ class Schema:
                         for field_name in raw_func.fields:
                             validators.setdefault(field_name, []).append(raw_func.func)
         return validators
+
+    @classmethod
+    @functools.lru_cache(maxsize=1024)
+    def _get_field_serializers(cls) -> dict[str, list[Callable[..., Any]]]:
+        """Collect @field_serializer methods defined across class hierarchy."""
+        serializers: dict[str, list[Callable[..., Any]]] = {}
+        for base in reversed(cls.__mro__):
+            if base is Schema or not issubclass(base, Schema):
+                continue
+            for name, attr in base.__dict__.items():
+                if isinstance(attr, FieldSerializerMarker):
+                    func = attr.func
+                    if isinstance(func, (classmethod, staticmethod)):
+                        func = func.__func__
+                    for field_name in attr.fields:
+                        serializers.setdefault(field_name, []).append(func)
+                elif hasattr(attr, "__func__"):
+                    raw_func = getattr(attr, "__func__")
+                    if isinstance(raw_func, FieldSerializerMarker):
+                        for field_name in raw_func.fields:
+                            serializers.setdefault(field_name, []).append(raw_func.func)
+        return serializers
 
     @classmethod
     def validate(cls, data: Any) -> Self:
