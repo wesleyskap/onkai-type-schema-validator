@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import inspect
 from datetime import date, datetime
 from typing import Any
 from typed_schema_validator.field import FieldInfo
@@ -12,20 +13,34 @@ def dump(obj: Any, by_alias: bool = False) -> Any:
     and standard collections to standard JSON-compatible Python primitives.
     
     If `by_alias=True`, schema fields with an alias will be dumped using their alias name.
+    Custom `@field_serializer` methods will be invoked if defined on Schema subclasses.
     """
     if obj is None:
         return None
 
     if isinstance(obj, Schema):
         hints = obj._get_resolved_annotations()
+        serializers = obj._get_field_serializers()
         result = {}
+
         for key in hints:
             val = getattr(obj, key, None)
             dump_key = key
+
             if by_alias and hasattr(obj.__class__, key):
                 attr_val = getattr(obj.__class__, key)
                 if isinstance(attr_val, FieldInfo) and attr_val.alias:
                     dump_key = attr_val.alias
+
+            # Apply custom @field_serializer if registered
+            if key in serializers:
+                for s_func in serializers[key]:
+                    sig = inspect.signature(s_func)
+                    if len(sig.parameters) >= 2:
+                        val = s_func(obj.__class__, val)
+                    else:
+                        val = s_func(val)
+
             result[dump_key] = dump(val, by_alias=by_alias)
         return result
 

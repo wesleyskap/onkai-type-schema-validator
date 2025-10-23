@@ -4,6 +4,7 @@ Typed Schema Validator - Clean Python 3.12+ data validation framework using PEP 
 
 from typed_schema_validator.errors import FieldError, ValidationError
 from typed_schema_validator.field import Field, FieldInfo
+from typed_schema_validator.field_serializer import field_serializer
 from typed_schema_validator.field_validator import field_validator
 from typed_schema_validator.json_schema import to_json_schema
 from typed_schema_validator.schema import Schema
@@ -15,6 +16,7 @@ __all__ = [
     "Field",
     "FieldInfo",
     "field_validator",
+    "field_serializer",
     "validate",
     "dump",
     "to_json_schema",
