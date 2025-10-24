@@ -10,7 +10,7 @@ class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
     aliases, extra field policies, frozen immutability, cached reflection, model copy,
-    and JSON Schema generation capabilities.
+    validation context, and JSON Schema generation capabilities.
     """
 
     extra: str = "ignore"  # Options: "ignore", "forbid"
@@ -146,10 +146,15 @@ class Schema:
         return serializers
 
     @classmethod
-    def validate(cls, data: Any) -> Self:
+    def validate(
+        cls,
+        data: Any,
+        context: dict[str, Any] | None = None,
+        strict: bool = True,
+    ) -> Self:
         """Validate input dictionary/data and return an instance of this Schema."""
         from typed_schema_validator.validator import validate as core_validate
-        return core_validate(cls, data)
+        return core_validate(cls, data, context=context, strict=strict)
 
     @classmethod
     def json_schema(cls) -> dict[str, Any]:

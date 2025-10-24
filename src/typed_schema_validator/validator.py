@@ -42,13 +42,28 @@ def _get_schema_field_info_map(raw_class: type) -> tuple[dict[str, FieldInfo], s
     return field_info_map, mapped_input_keys
 
 
-def validate[T](target_type: Any, data: Any, path: str = "") -> T:
+def validate[T](
+    target_type: Any,
+    data: Any,
+    path: str = "",
+    context: dict[str, Any] | None = None,
+    strict: bool = True,
+) -> T:
     """
     Validate `data` against `target_type` (including PEP 695 generics, dataclasses, typeddicts, unions, schemas).
+    Supports optional `context` dictionary for custom validators and `strict` mode flag.
     Raises ValidationError if data fails to match target_type or field constraints.
     """
     errors: list[FieldError] = []
-    result = _validate_internal(target_type, data, path, errors, type_var_map={})
+    result = _validate_internal(
+        target_type,
+        data,
+        path,
+        errors,
+        type_var_map={},
+        context=context or {},
+        strict=strict,
+    )
     if errors:
         raise ValidationError(errors)
     return result
@@ -138,6 +153,8 @@ def _validate_internal(
     path: str,
     errors: list[FieldError],
     type_var_map: dict[Any, Any],
+    context: dict[str, Any],
+    strict: bool,
 ) -> Any:
     # 1. Build type var mapping from specialized generic / alias args
     base_origin, new_type_var_map = build_type_var_map(target_type)
@@ -169,7 +186,9 @@ def _validate_internal(
             if variant is type(None) and data is not None:
                 continue
             sub_errors: list[FieldError] = []
-            res = _validate_internal(variant, data, path, sub_errors, merged_map)
+            res = _validate_internal(
+                variant, data, path, sub_errors, merged_map, context, strict
+            )
             if not sub_errors:
                 return res
 
@@ -252,7 +271,7 @@ def _validate_internal(
             if key in data:
                 val = data[key]
                 validated_val = _validate_internal(
-                    effective_type, val, key_path, errors, merged_map
+                    effective_type, val, key_path, errors, merged_map, context, strict
                 )
                 validated_dict[key] = validated_val
             elif is_req:
@@ -290,7 +309,7 @@ def _validate_internal(
             if f_name in data:
                 val = data[f_name]
                 validated_val = _validate_internal(
-                    effective_type, val, field_path, errors, merged_map
+                    effective_type, val, field_path, errors, merged_map, context, strict
                 )
                 kwargs[f_name] = validated_val
             elif f_obj.default is not dataclasses.MISSING:
@@ -332,7 +351,7 @@ def _validate_internal(
             for idx, item in enumerate(data):
                 item_path = f"{path}[{idx}]" if path else f"[{idx}]"
                 validated_item = _validate_internal(
-                    item_type, item, item_path, errors, merged_map
+                    item_type, item, item_path, errors, merged_map, context, strict
                 )
                 validated_list.append(validated_item)
             return validated_list
@@ -354,8 +373,12 @@ def _validate_internal(
             for k, v in data.items():
                 key_path = f"{path}.<key:{k}>" if path else f"<key:{k}>"
                 val_path = f"{path}.{k}" if path else str(k)
-                vk = _validate_internal(key_type, k, key_path, errors, merged_map)
-                vv = _validate_internal(val_type, v, val_path, errors, merged_map)
+                vk = _validate_internal(
+                    key_type, k, key_path, errors, merged_map, context, strict
+                )
+                vv = _validate_internal(
+                    val_type, v, val_path, errors, merged_map, context, strict
+                )
                 validated_dict[vk] = vv
             return validated_dict
 
@@ -375,7 +398,9 @@ def _validate_internal(
             for idx, item in enumerate(data):
                 item_path = f"{path}{{{idx}}}" if path else f"{{{idx}}}"
                 validated_set.add(
-                    _validate_internal(item_type, item, item_path, errors, merged_map)
+                    _validate_internal(
+                        item_type, item, item_path, errors, merged_map, context, strict
+                    )
                 )
             return validated_set
 
@@ -400,6 +425,8 @@ def _validate_internal(
                             f"{path}[{i}]" if path else f"[{i}]",
                             errors,
                             merged_map,
+                            context,
+                            strict,
                         )
                         for i, item in enumerate(data)
                     )
@@ -422,6 +449,8 @@ def _validate_internal(
                             f"{path}[{i}]" if path else f"[{i}]",
                             errors,
                             merged_map,
+                            context,
+                            strict,
                         )
                         for i, item in enumerate(data)
                     )
@@ -480,7 +509,13 @@ def _validate_internal(
 
             if found_key:
                 validated_val = _validate_internal(
-                    effective_type, input_val, field_path, errors, merged_map
+                    effective_type,
+                    input_val,
+                    field_path,
+                    errors,
+                    merged_map,
+                    context,
+                    strict,
                 )
 
                 if field_info is not None:
@@ -490,8 +525,19 @@ def _validate_internal(
                     for v_func in custom_validators[field_name]:
                         try:
                             sig = inspect.signature(v_func)
-                            params_count = len(sig.parameters)
-                            if params_count >= 2:
+                            params = sig.parameters
+                            param_names = list(params.keys())
+
+                            if "context" in param_names:
+                                if len(param_names) >= 3 or (
+                                    len(param_names) == 2 and param_names[0] != "context"
+                                ):
+                                    validated_val = v_func(
+                                        raw_class, validated_val, context=context
+                                    )
+                                else:
+                                    validated_val = v_func(validated_val, context=context)
+                            elif len(param_names) >= 2:
                                 validated_val = v_func(raw_class, validated_val)
                             else:
                                 validated_val = v_func(validated_val)
@@ -529,7 +575,7 @@ def _validate_internal(
         instance = raw_class(**kwargs)
         return instance
 
-    # 12. Basic Primitives & Standard Types
+    # 12. Basic Primitives & Standard Types (with optional Non-Strict Coercion)
     if isinstance(target_type, type):
         if target_type is int and isinstance(data, bool):
             errors.append(
@@ -542,6 +588,12 @@ def _validate_internal(
             )
             return None
         if target_type is bool and not isinstance(data, bool):
+            if not strict and isinstance(data, (int, str)):
+                if data in (1, "1", "true", "True", "TRUE"):
+                    return True
+                if data in (0, "0", "false", "False", "FALSE"):
+                    return False
+
             errors.append(
                 FieldError(
                     path=path,
@@ -554,6 +606,21 @@ def _validate_internal(
 
         if isinstance(data, target_type):
             return data
+
+        # Loose / Non-Strict Coercion
+        if not strict:
+            if target_type is int and isinstance(data, (str, float)):
+                try:
+                    return int(data)
+                except ValueError:
+                    pass
+            elif target_type is float and isinstance(data, (str, int)):
+                try:
+                    return float(data)
+                except ValueError:
+                    pass
+            elif target_type is str:
+                return str(data)
 
         errors.append(
             FieldError(
