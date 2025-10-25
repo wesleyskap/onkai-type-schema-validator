@@ -10,7 +10,7 @@ class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
     aliases, extra field policies, frozen immutability, cached reflection, model copy,
-    validation context, and JSON Schema generation capabilities.
+    validation context, async validation, and JSON Schema generation capabilities.
     """
 
     extra: str = "ignore"  # Options: "ignore", "forbid"
@@ -155,6 +155,17 @@ class Schema:
         """Validate input dictionary/data and return an instance of this Schema."""
         from typed_schema_validator.validator import validate as core_validate
         return core_validate(cls, data, context=context, strict=strict)
+
+    @classmethod
+    async def async_validate(
+        cls,
+        data: Any,
+        context: dict[str, Any] | None = None,
+        strict: bool = True,
+    ) -> Self:
+        """Asynchronously validate input dictionary/data supporting async custom validators."""
+        from typed_schema_validator.async_validator import async_validate as core_async_validate
+        return await core_async_validate(cls, data, context=context, strict=strict)
 
     @classmethod
     def json_schema(cls) -> dict[str, Any]:

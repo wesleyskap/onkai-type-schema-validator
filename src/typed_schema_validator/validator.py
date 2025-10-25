@@ -48,6 +48,7 @@ def validate[T](
     path: str = "",
     context: dict[str, Any] | None = None,
     strict: bool = True,
+    allow_async_validators: bool = False,
 ) -> T:
     """
     Validate `data` against `target_type` (including PEP 695 generics, dataclasses, typeddicts, unions, schemas).
@@ -63,6 +64,7 @@ def validate[T](
         type_var_map={},
         context=context or {},
         strict=strict,
+        allow_async_validators=allow_async_validators,
     )
     if errors:
         raise ValidationError(errors)
@@ -155,6 +157,7 @@ def _validate_internal(
     type_var_map: dict[Any, Any],
     context: dict[str, Any],
     strict: bool,
+    allow_async_validators: bool = False,
 ) -> Any:
     # 1. Build type var mapping from specialized generic / alias args
     base_origin, new_type_var_map = build_type_var_map(target_type)
@@ -187,7 +190,14 @@ def _validate_internal(
                 continue
             sub_errors: list[FieldError] = []
             res = _validate_internal(
-                variant, data, path, sub_errors, merged_map, context, strict
+                variant,
+                data,
+                path,
+                sub_errors,
+                merged_map,
+                context,
+                strict,
+                allow_async_validators,
             )
             if not sub_errors:
                 return res
@@ -271,7 +281,14 @@ def _validate_internal(
             if key in data:
                 val = data[key]
                 validated_val = _validate_internal(
-                    effective_type, val, key_path, errors, merged_map, context, strict
+                    effective_type,
+                    val,
+                    key_path,
+                    errors,
+                    merged_map,
+                    context,
+                    strict,
+                    allow_async_validators,
                 )
                 validated_dict[key] = validated_val
             elif is_req:
@@ -309,7 +326,14 @@ def _validate_internal(
             if f_name in data:
                 val = data[f_name]
                 validated_val = _validate_internal(
-                    effective_type, val, field_path, errors, merged_map, context, strict
+                    effective_type,
+                    val,
+                    field_path,
+                    errors,
+                    merged_map,
+                    context,
+                    strict,
+                    allow_async_validators,
                 )
                 kwargs[f_name] = validated_val
             elif f_obj.default is not dataclasses.MISSING:
@@ -351,7 +375,14 @@ def _validate_internal(
             for idx, item in enumerate(data):
                 item_path = f"{path}[{idx}]" if path else f"[{idx}]"
                 validated_item = _validate_internal(
-                    item_type, item, item_path, errors, merged_map, context, strict
+                    item_type,
+                    item,
+                    item_path,
+                    errors,
+                    merged_map,
+                    context,
+                    strict,
+                    allow_async_validators,
                 )
                 validated_list.append(validated_item)
             return validated_list
@@ -374,10 +405,24 @@ def _validate_internal(
                 key_path = f"{path}.<key:{k}>" if path else f"<key:{k}>"
                 val_path = f"{path}.{k}" if path else str(k)
                 vk = _validate_internal(
-                    key_type, k, key_path, errors, merged_map, context, strict
+                    key_type,
+                    k,
+                    key_path,
+                    errors,
+                    merged_map,
+                    context,
+                    strict,
+                    allow_async_validators,
                 )
                 vv = _validate_internal(
-                    val_type, v, val_path, errors, merged_map, context, strict
+                    val_type,
+                    v,
+                    val_path,
+                    errors,
+                    merged_map,
+                    context,
+                    strict,
+                    allow_async_validators,
                 )
                 validated_dict[vk] = vv
             return validated_dict
@@ -399,7 +444,14 @@ def _validate_internal(
                 item_path = f"{path}{{{idx}}}" if path else f"{{{idx}}}"
                 validated_set.add(
                     _validate_internal(
-                        item_type, item, item_path, errors, merged_map, context, strict
+                        item_type,
+                        item,
+                        item_path,
+                        errors,
+                        merged_map,
+                        context,
+                        strict,
+                        allow_async_validators,
                     )
                 )
             return validated_set
@@ -427,6 +479,7 @@ def _validate_internal(
                             merged_map,
                             context,
                             strict,
+                            allow_async_validators,
                         )
                         for i, item in enumerate(data)
                     )
@@ -451,6 +504,7 @@ def _validate_internal(
                             merged_map,
                             context,
                             strict,
+                            allow_async_validators,
                         )
                         for i, item in enumerate(data)
                     )
@@ -516,6 +570,7 @@ def _validate_internal(
                     merged_map,
                     context,
                     strict,
+                    allow_async_validators,
                 )
 
                 if field_info is not None:
@@ -523,6 +578,22 @@ def _validate_internal(
 
                 if field_name in custom_validators:
                     for v_func in custom_validators[field_name]:
+                        if inspect.iscoroutinefunction(v_func):
+                            if not allow_async_validators:
+                                errors.append(
+                                    FieldError(
+                                        path=field_path,
+                                        expected="sync validator",
+                                        actual_value=validated_val,
+                                        message=(
+                                            f"Async field validator '{v_func.__name__}'"
+                                            f" found on field '{field_name}'. Use"
+                                            " async_validate() instead of validate()."
+                                        ),
+                                    )
+                                )
+                            continue
+
                         try:
                             sig = inspect.signature(v_func)
                             params = sig.parameters
@@ -575,7 +646,7 @@ def _validate_internal(
         instance = raw_class(**kwargs)
         return instance
 
-    # 12. Basic Primitives & Standard Types (with optional Non-Strict Coercion)
+    # 12. Basic Primitives & Standard Types
     if isinstance(target_type, type):
         if target_type is int and isinstance(data, bool):
             errors.append(
@@ -607,7 +678,6 @@ def _validate_internal(
         if isinstance(data, target_type):
             return data
 
-        # Loose / Non-Strict Coercion
         if not strict:
             if target_type is int and isinstance(data, (str, float)):
                 try:
