@@ -6,6 +6,7 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
 - **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
+- **Model-Level Validators**: `@model_validator(mode="before"|"after")` decorator for cross-field validation rules and raw data preprocessing.
 - **Async Validation Support**: Native `async_validate()` and `Schema.async_validate()` for asynchronous I/O field validators (e.g. database lookups).
 - **Validation Context**: Pass runtime environment state (`validate(Model, data, context={...})`) directly to `@field_validator` methods.
 - **Strict vs Loose Mode**: Support for type coercion (e.g., numeric strings `"123"` -> `123`) using `validate(Model, data, strict=False)`.
@@ -56,6 +57,24 @@ print(user.email) # None
 
 # Dump to dictionary
 data_dict = user.dump()
+```
+
+### Model-Level Validators
+
+```python
+from typed_schema_validator import Schema, model_validator, validate
+
+class Registration(Schema):
+    password: str
+    confirm_password: str
+
+    @model_validator(mode="after")
+    def validate_passwords_match(self):
+        if self.password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        return self
+
+user = validate(Registration, {"password": "secret", "confirm_password": "secret"})
 ```
 
 ### Asynchronous Validation
@@ -309,16 +328,17 @@ except ValidationError as e:
 
 ## Architecture
 
-1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, `.copy(update={...})`, LRU caching for annotations, field validators, and field serializers, field aliases, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
-2. **Async Validation Engine (`src/typed_schema_validator/async_validator.py`)**: Asynchronous validation support executing async custom field validators (`async def`).
-3. **JSON Schema Engine (`src/typed_schema_validator/json_schema.py`)**: Generates OpenAPI / JSON Schema Draft-07 dictionaries resolving PEP 695 generic type parameters and constraints.
-4. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, field aliases, default factories).
-5. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator supporting sync and async functions with optional context.
-6. **Custom Serializers (`src/typed_schema_validator/field_serializer.py`)**: Implements `@field_serializer` decorator to format properties during model dumping.
-7. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, type variable substitutions, and LRU mapping caches.
-8. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, field aliases, extra field policies, validation context, strict/loose modes, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
-9. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives with `@field_serializer` support and optional alias mapping (`by_alias=True`).
-10. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
+1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, `.copy(update={...})`, LRU caching for annotations, field validators, model validators, and field serializers, field aliases, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
+2. **Model Validators (`src/typed_schema_validator/model_validator.py`)**: Implements `@model_validator(mode="before"|"after")` decorator for cross-field validation rules and raw data preprocessing.
+3. **Async Validation Engine (`src/typed_schema_validator/async_validator.py`)**: Asynchronous validation support executing async custom field validators (`async def`).
+4. **JSON Schema Engine (`src/typed_schema_validator/json_schema.py`)**: Generates OpenAPI / JSON Schema Draft-07 dictionaries resolving PEP 695 generic type parameters and constraints.
+5. **Field & Constraints (`src/typed_schema_validator/field.py`)**: Contains `FieldInfo` container for declarative validation rules (min/max length, numeric bounds, regex patterns, field aliases, default factories).
+6. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator supporting sync and async functions with optional context.
+7. **Custom Serializers (`src/typed_schema_validator/field_serializer.py`)**: Implements `@field_serializer` decorator to format properties during model dumping.
+8. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, type variable substitutions, and LRU mapping caches.
+9. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, field aliases, extra field policies, model-level validators, validation context, strict/loose modes, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
+10. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives with `@field_serializer` support and optional alias mapping (`by_alias=True`).
+11. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
 
 ## Running Benchmarks
 

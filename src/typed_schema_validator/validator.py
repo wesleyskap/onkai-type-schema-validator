@@ -523,6 +523,26 @@ def _validate_internal(
             )
             return None
 
+        # Run @model_validator(mode="before")
+        model_validators = raw_class._get_model_validators()
+        for mv in model_validators.get("before", []):
+            try:
+                sig = inspect.signature(mv)
+                params_count = len(sig.parameters)
+                if params_count >= 2:
+                    data = mv(raw_class, data)
+                else:
+                    data = mv(data)
+            except (ValueError, TypeError, AssertionError) as err:
+                errors.append(
+                    FieldError(
+                        path=path,
+                        expected="model validator before check",
+                        actual_value=data,
+                        message=str(err),
+                    )
+                )
+
         annotations = raw_class._get_resolved_annotations()
         custom_validators = raw_class._get_field_validators()
         extra_policy = getattr(raw_class, "extra", "ignore")
@@ -644,6 +664,28 @@ def _validate_internal(
                 )
 
         instance = raw_class(**kwargs)
+
+        # Run @model_validator(mode="after")
+        for mv in model_validators.get("after", []):
+            try:
+                sig = inspect.signature(mv)
+                params_count = len(sig.parameters)
+                if params_count >= 2:
+                    res_instance = mv(raw_class, instance)
+                else:
+                    res_instance = mv(instance)
+                if res_instance is not None:
+                    instance = res_instance
+            except (ValueError, TypeError, AssertionError) as err:
+                errors.append(
+                    FieldError(
+                        path=path,
+                        expected="model validator after check",
+                        actual_value=instance,
+                        message=str(err),
+                    )
+                )
+
         return instance
 
     # 12. Basic Primitives & Standard Types

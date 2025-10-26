@@ -4,13 +4,14 @@ from typing import Any, Callable, Self
 from typed_schema_validator.field import FieldInfo
 from typed_schema_validator.field_serializer import FieldSerializerMarker
 from typed_schema_validator.field_validator import FieldValidatorMarker
+from typed_schema_validator.model_validator import ModelValidatorMarker
 
 
 class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
     aliases, extra field policies, frozen immutability, cached reflection, model copy,
-    validation context, async validation, and JSON Schema generation capabilities.
+    model-level validators, validation context, async validation, and JSON Schema generation capabilities.
     """
 
     extra: str = "ignore"  # Options: "ignore", "forbid"
@@ -121,6 +122,31 @@ class Schema:
                     if isinstance(raw_func, FieldValidatorMarker):
                         for field_name in raw_func.fields:
                             validators.setdefault(field_name, []).append(raw_func.func)
+        return validators
+
+    @classmethod
+    @functools.lru_cache(maxsize=1024)
+    def _get_model_validators(
+        cls,
+    ) -> dict[str, list[Callable[..., Any]]]:
+        """Collect @model_validator methods defined across class hierarchy."""
+        validators: dict[str, list[Callable[..., Any]]] = {
+            "before": [],
+            "after": [],
+        }
+        for base in reversed(cls.__mro__):
+            if base is Schema or not issubclass(base, Schema):
+                continue
+            for name, attr in base.__dict__.items():
+                if isinstance(attr, ModelValidatorMarker):
+                    func = attr.func
+                    if isinstance(func, (classmethod, staticmethod)):
+                        func = func.__func__
+                    validators[attr.mode].append(func)
+                elif hasattr(attr, "__func__"):
+                    raw_func = getattr(attr, "__func__")
+                    if isinstance(raw_func, ModelValidatorMarker):
+                        validators[raw_func.mode].append(raw_func.func)
         return validators
 
     @classmethod
