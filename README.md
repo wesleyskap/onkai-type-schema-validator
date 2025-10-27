@@ -6,6 +6,7 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
 - **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
+- **Polymorphic Discriminated Unions**: Fast-path polymorphic union resolution based on `Literal` discriminator tag fields.
 - **Model-Level Validators**: `@model_validator(mode="before"|"after")` decorator for cross-field validation rules and raw data preprocessing.
 - **Async Validation Support**: Native `async_validate()` and `Schema.async_validate()` for asynchronous I/O field validators (e.g. database lookups).
 - **Validation Context**: Pass runtime environment state (`validate(Model, data, context={...})`) directly to `@field_validator` methods.
@@ -57,6 +58,26 @@ print(user.email) # None
 
 # Dump to dictionary
 data_dict = user.dump()
+```
+
+### Polymorphic Discriminated Unions
+
+```python
+from typing import Literal
+from typed_schema_validator import Schema, validate
+
+class Cat(Schema):
+    pet_type: Literal["cat"]
+    meow_volume: int
+
+class Dog(Schema):
+    pet_type: Literal["dog"]
+    bark_pitch: str
+
+type Pet = Cat | Dog
+
+pet = validate(Pet, {"pet_type": "cat", "meow_volume": 85})
+print(type(pet).__name__) # Cat
 ```
 
 ### Model-Level Validators
@@ -336,7 +357,7 @@ except ValidationError as e:
 6. **Custom Validators (`src/typed_schema_validator/field_validator.py`)**: Implements `@field_validator` decorator supporting sync and async functions with optional context.
 7. **Custom Serializers (`src/typed_schema_validator/field_serializer.py`)**: Implements `@field_serializer` decorator to format properties during model dumping.
 8. **Type Inspector (`src/typed_schema_validator/type_inspector.py`)**: Handles runtime inspection of PEP 695 type parameters (`__type_params__`), generic specialization, type variable substitutions, and LRU mapping caches.
-9. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, field aliases, extra field policies, model-level validators, validation context, strict/loose modes, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
+9. **Validator Engine (`src/typed_schema_validator/validator.py`)**: Core recursive validation engine processing dataclasses, typeddicts, field aliases, extra field policies, polymorphic discriminated unions, model-level validators, validation context, strict/loose modes, unions, aliases, containers, enums, literals, field constraints, custom validators, and schema instances.
 10. **Serializer Engine (`src/typed_schema_validator/serializer.py`)**: Converts schema models, dataclasses, datetimes, enums, and collections back to standard Python dictionaries and primitives with `@field_serializer` support and optional alias mapping (`by_alias=True`).
 11. **Errors (`src/typed_schema_validator/errors.py`)**: Defines `FieldError` for detailed path location tracking and `ValidationError` exceptions.
 

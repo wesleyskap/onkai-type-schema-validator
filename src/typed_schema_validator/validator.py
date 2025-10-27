@@ -179,12 +179,48 @@ def _validate_internal(
     base_origin, extra_type_var_map = build_type_var_map(target_type)
     merged_map.update(extra_type_var_map)
 
-    # 5. Union Types
+    # 5. Union Types & Polymorphic Discriminated Unions
     if is_union_type(target_type):
         union_args = get_union_args(target_type)
         if data is None and type(None) in union_args:
             return None
 
+        # Discriminated union fast path: if payload is dict, inspect for literal tag matching
+        if isinstance(data, dict):
+            matched_variant = None
+            for variant in union_args:
+                if variant is type(None):
+                    continue
+                v_class = get_origin(variant) or variant
+                if inspect.isclass(v_class) and issubclass(v_class, Schema):
+                    annotations = v_class._get_resolved_annotations()
+                    for f_name, f_tp in annotations.items():
+                        if get_origin(f_tp) is Literal:
+                            allowed_literals = get_args(f_tp)
+                            if f_name in data and data[f_name] in allowed_literals:
+                                matched_variant = variant
+                                break
+                    if matched_variant is not None:
+                        break
+
+            if matched_variant is not None:
+                sub_errors: list[FieldError] = []
+                res = _validate_internal(
+                    matched_variant,
+                    data,
+                    path,
+                    sub_errors,
+                    merged_map,
+                    context,
+                    strict,
+                    allow_async_validators,
+                )
+                if not sub_errors:
+                    return res
+                errors.extend(sub_errors)
+                return None
+
+        # Fallback to standard variant testing
         for variant in union_args:
             if variant is type(None) and data is not None:
                 continue
