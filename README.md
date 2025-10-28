@@ -6,6 +6,7 @@ Typed Schema Validator is a data validation and serialization framework for Pyth
 
 - **PEP 695 Generic Syntax**: Native support for `class Model[T]: ...` and `type Alias[T] = ...` without `TypeVar` or `Generic` boilerplate.
 - **Dataclass & TypedDict Support**: Direct validation and serialization for standard Python `@dataclass` and `TypedDict` structures.
+- **Schema Introspection API**: Classmethod `Schema.fields()` for programmatic reflection of types, aliases, defaults, and constraints.
 - **Polymorphic Discriminated Unions**: Fast-path polymorphic union resolution based on `Literal` discriminator tag fields.
 - **Model-Level Validators**: `@model_validator(mode="before"|"after")` decorator for cross-field validation rules and raw data preprocessing.
 - **Async Validation Support**: Native `async_validate()` and `Schema.async_validate()` for asynchronous I/O field validators (e.g. database lookups).
@@ -58,6 +59,20 @@ print(user.email) # None
 
 # Dump to dictionary
 data_dict = user.dump()
+```
+
+### Schema Introspection API
+
+```python
+from typed_schema_validator import Schema, Field
+
+class UserProfile(Schema):
+    user_id: int = Field(alias="userId", gt=0)
+    name: str = "Anonymous"
+
+metadata = UserProfile.fields()
+print(metadata["user_id"]["alias"])        # userId
+print(metadata["name"]["default"])         # Anonymous
 ```
 
 ### Polymorphic Discriminated Unions
@@ -349,7 +364,7 @@ except ValidationError as e:
 
 ## Architecture
 
-1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, `.copy(update={...})`, LRU caching for annotations, field validators, model validators, and field serializers, field aliases, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
+1. **Schema Base (`src/typed_schema_validator/schema.py`)**: Defines class attribute resolution, `.copy(update={...})`, `Schema.fields()` reflection API, LRU caching for annotations, field validators, model validators, and field serializers, field aliases, extra field policies, frozen immutability, hashability, field annotations, equality checking, custom validator collection, and JSON Schema export.
 2. **Model Validators (`src/typed_schema_validator/model_validator.py`)**: Implements `@model_validator(mode="before"|"after")` decorator for cross-field validation rules and raw data preprocessing.
 3. **Async Validation Engine (`src/typed_schema_validator/async_validator.py`)**: Asynchronous validation support executing async custom field validators (`async def`).
 4. **JSON Schema Engine (`src/typed_schema_validator/json_schema.py`)**: Generates OpenAPI / JSON Schema Draft-07 dictionaries resolving PEP 695 generic type parameters and constraints.

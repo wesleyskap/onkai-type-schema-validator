@@ -11,7 +11,8 @@ class Schema:
     """
     Base Schema class for creating strongly-typed models with constraint, validation,
     aliases, extra field policies, frozen immutability, cached reflection, model copy,
-    model-level validators, validation context, async validation, and JSON Schema generation capabilities.
+    model-level validators, validation context, async validation, introspection, and
+    JSON Schema generation capabilities.
     """
 
     extra: str = "ignore"  # Options: "ignore", "forbid"
@@ -89,6 +90,43 @@ class Schema:
             else:
                 values.append((k, val))
         return hash((self.__class__.__name__, tuple(values)))
+
+    @classmethod
+    def fields(cls) -> dict[str, dict[str, Any]]:
+        """
+        Return a metadata dictionary describing all fields defined on this Schema,
+        including types, aliases, default values, and constraint rules.
+        """
+        hints = cls._get_resolved_annotations()
+        metadata: dict[str, dict[str, Any]] = {}
+
+        for fn, ftype in hints.items():
+            f_info: FieldInfo | None = None
+            if hasattr(cls, fn):
+                attr_val = getattr(cls, fn)
+                if isinstance(attr_val, FieldInfo):
+                    f_info = attr_val
+
+            alias = f_info.alias if f_info and f_info.alias else fn
+            has_def = False
+            default_val = None
+
+            if f_info is not None and f_info.has_default():
+                has_def = True
+                default_val = f_info.get_default()
+            elif hasattr(cls, fn) and not isinstance(getattr(cls, fn), FieldInfo):
+                has_def = True
+                default_val = getattr(cls, fn)
+
+            metadata[fn] = {
+                "type": ftype,
+                "alias": alias,
+                "has_default": has_def,
+                "default": default_val,
+                "constraints": f_info,
+            }
+
+        return metadata
 
     @classmethod
     @functools.lru_cache(maxsize=1024)
